@@ -1,6 +1,28 @@
 import requests
 import time
 
+# --- HTTP health server для Render ---
+import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+def run_http_server():
+    port = int(os.environ.get("PORT", "8000"))
+    server = HTTPServer(("", port), HealthHandler)
+    print(f"🌐 HTTP health server запущен на порту {port}")
+    server.serve_forever()
+
+# запускаем сервер в отдельном потоке
+threading.Thread(target=run_http_server, daemon=True).start()
+
+
 # ================== НАСТРОЙКА ==================
 ADDRESS = "CxKFkAu8LngjYmcCjT2siKyAiMrKjbTB96NRXg8jqHH6"
 
