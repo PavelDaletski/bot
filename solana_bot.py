@@ -1,16 +1,16 @@
-
 import requests
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
 
 # === Настройки ===
-ADDRESS = "CBEADkb8TZAXHjVE3zwad4L995GZE7rJcacJ7asebkVG"
+ADDRESS = "CxKFkAu8LngjYmcCjT2siKyAiMrKjbTB96NRXg8jqHH6"
 RPC_URL = "https://api.mainnet-beta.solana.com"
 CHECK_INTERVAL = 30  # Проверка каждые 30 секунд
 
 BOT_TOKEN = "8162509137:AAEJE0QFu1EIovWpO4MMTdRh2zKC-n-_ZT4"
 CHAT_ID = "1822483442"
+
 last_signature = None
 
 
@@ -35,7 +35,7 @@ def send_telegram_message(text):
         print("⚠️ Ошибка при отправке в Telegram:", e)
 
 
-# === Запрос к Solana RPC ===
+# === Получение последних транзакций ===
 def get_recent_transfers():
     payload = {
         "jsonrpc": "2.0",
@@ -75,9 +75,9 @@ def check_new_transfers():
         print("⏳ Нет новых трансферов...")
         return
 
-    # Отправка уведомлений
+    # Отправляем уведомления о новых трансферах
     for sig in reversed(new_sigs):
-        solscan_url = f"https://solscan.io/account/{ADDRESS}?exclude_amount_zero=true&remove_spam=true#transfers"
+        solscan_url = f"https://solscan.io/account/{ADDRESS}#transfers"
         msg = (
             f"💸 *Новый трансфер обнаружен!*\n"
             f"🔗 [Открыть в Solscan]({solscan_url})\n"
@@ -89,7 +89,7 @@ def check_new_transfers():
     last_signature = data[0].get("signature")
 
 
-# === HTTP сервер для Render ===
+# === HTTP сервер для Render (чтобы бот считался активным) ===
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
