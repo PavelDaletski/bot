@@ -2,6 +2,7 @@ import requests
 import time
 import os
 import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ================== Настройки ==================
 ADDRESS = "CxKFkAu8LngjYmcCjT2siKyAiMrKjbTB96NRXg8jqHH6"  # твой кошелек
@@ -9,13 +10,11 @@ CHECK_INTERVAL = 30  # секунд между проверками
 BOT_TOKEN = "8162509137:AAEJE0QFu1EIovWpO4MMTdRh2zKC-n-_ZT4"
 CHAT_ID = "1822483442"
 RPC_URLS = [
-    "https://api.mainnet.rpcpool.com",
-    "https://solana-api.projectserum.com",
-    "https://rpc.ankr.com/solana"
+    "https://api.mainnet-beta.solana.com",  # рабочий официальный RPC Solana
+    "https://rpc.ankr.com/solana"          # запасной RPC
 ]
 
 last_signatures = set()
-
 
 # ================== Telegram ==================
 def send_telegram_message(text):
@@ -28,10 +27,7 @@ def send_telegram_message(text):
     except Exception as e:
         print("Ошибка Telegram:", e)
 
-
 # ================== HTTP health server для Render ==================
-from http.server import HTTPServer, BaseHTTPRequestHandler
-
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -46,7 +42,6 @@ def run_http_server():
     server.serve_forever()
 
 threading.Thread(target=run_http_server, daemon=True).start()
-
 
 # ================== RPC запрос ==================
 def rpc_request(method, params=None):
@@ -65,7 +60,6 @@ def rpc_request(method, params=None):
             print(f"⚠️ RPC ошибка ({rpc}): {e}")
     return None
 
-
 # ================== Получение новых транзакций ==================
 def get_new_transfers():
     global last_signatures
@@ -79,17 +73,19 @@ def get_new_transfers():
         if sig and sig not in last_signatures:
             new_sigs.append(sig)
 
-    # обновляем список уже обработанных
     for sig in new_sigs:
         last_signatures.add(sig)
 
     return list(reversed(new_sigs))  # старые -> новые
 
-
 # ================== Основной цикл ==================
 def main():
     print("🚀 Бот запущен! Отслеживаем трансферы...")
-    # Инициализация последних транзакций при старте
+
+    # Тестовое уведомление при старте
+    send_telegram_message("✅ Бот успешно запущен и отслеживает новые транзакции на Solana!")
+
+    # Инициализация последних транзакций
     init_sigs = rpc_request("getSignaturesForAddress", [ADDRESS, {"limit": 20}])
     if init_sigs:
         for tx in init_sigs:
@@ -102,11 +98,10 @@ def main():
             for sig in new_txs:
                 url = f"https://solscan.io/tx/{sig}"
                 print(f"💸 Новая трансакция: {url}")
-                msg = f"💸 Новая трансакция на Solana!\n🔗 {url}\n📍 Адрес: {ADDRESS}"
+                msg = f"💸 Новая транзакция на Solana!\n🔗 {url}\n📍 Адрес: {ADDRESS}"
                 send_telegram_message(msg)
         else:
             print("⏳ Нет новых трансферов...")
-
 
 if __name__ == "__main__":
     main()
