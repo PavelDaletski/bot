@@ -1,19 +1,20 @@
+
 import requests
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
 
 # === Настройки ===
-ADDRESS = "cfKTJqVCaTt8Z7h46bpNEbymU295GD2ZJ59xf7qAxuM"
+ADDRESS = "CBEADkb8TZAXHjVE3zwad4L995GZE7rJcacJ7asebkVG"
 RPC_URL = "https://api.mainnet-beta.solana.com"
-CHECK_INTERVAL = 30  # проверка каждые 30 сек
+CHECK_INTERVAL = 30  # Проверка каждые 30 секунд
 
 BOT_TOKEN = "8162509137:AAEJE0QFu1EIovWpO4MMTdRh2zKC-n-_ZT4"
 CHAT_ID = "1822483442"
 last_signature = None
 
 
-# === Telegram уведомления ===
+# === Отправка сообщений в Telegram ===
 def send_telegram_message(text):
     if not BOT_TOKEN or not CHAT_ID:
         print("⚠️ Telegram не настроен, сообщение не отправлено:", text)
@@ -23,6 +24,7 @@ def send_telegram_message(text):
     payload = {
         "chat_id": CHAT_ID,
         "text": text,
+        "parse_mode": "Markdown",
         "disable_web_page_preview": False,
     }
     try:
@@ -30,10 +32,10 @@ def send_telegram_message(text):
         if r.status_code != 200:
             print("⚠️ Ошибка Telegram:", r.text)
     except Exception as e:
-        print("⚠️ Ошибка при отправке сообщения:", e)
+        print("⚠️ Ошибка при отправке в Telegram:", e)
 
 
-# === Запрос к RPC ===
+# === Запрос к Solana RPC ===
 def get_recent_transfers():
     payload = {
         "jsonrpc": "2.0",
@@ -60,7 +62,6 @@ def check_new_transfers():
         print("⚠️ Нет данных от RPC.")
         return
 
-    # Собираем новые подписи
     new_sigs = []
     for tx in data:
         sig = tx.get("signature")
@@ -74,12 +75,12 @@ def check_new_transfers():
         print("⏳ Нет новых трансферов...")
         return
 
-    # Отправляем уведомления
+    # Отправка уведомлений
     for sig in reversed(new_sigs):
-        url = f"https://solscan.io/account/{ADDRESS}#transfers"
+        solscan_url = f"https://solscan.io/account/{ADDRESS}?exclude_amount_zero=true&remove_spam=true#transfers"
         msg = (
-            f"💸 Новый трансфер на Solana!\n"
-            f"🔗 [Открыть в Solscan]({url})\n"
+            f"💸 *Новый трансфер обнаружен!*\n"
+            f"🔗 [Открыть в Solscan]({solscan_url})\n"
             f"📍 Адрес: `{ADDRESS}`"
         )
         print(msg)
@@ -95,6 +96,7 @@ class HealthHandler(BaseHTTPRequestHandler):
         self.send_header('Content-type', 'text/html')
         self.end_headers()
         self.wfile.write(b"Bot is running")
+
 
 def start_server():
     server = HTTPServer(('0.0.0.0', 10000), HealthHandler)
@@ -117,7 +119,7 @@ def main():
     else:
         print("⚠️ Не удалось получить последние трансферы при запуске.")
 
-    # Цикл
+    # Основной цикл
     while True:
         try:
             check_new_transfers()
@@ -127,7 +129,5 @@ def main():
 
 
 if __name__ == "__main__":
-    # Фон: сервер для Render
     threading.Thread(target=start_server, daemon=True).start()
-    # Запуск логики
     main()
