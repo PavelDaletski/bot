@@ -1,2 +1,4 @@
 requests
 solana
+python-dotenv
+aiogram
