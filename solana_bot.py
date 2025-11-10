@@ -1,102 +1,133 @@
-import time
 import requests
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
+
+# === Настройки ===
+ADDRESS = "cfKTJqVCaTt8Z7h46bpNEbymU295GD2ZJ59xf7qAxuM"
+RPC_URL = "https://api.mainnet-beta.solana.com"
+CHECK_INTERVAL = 30  # проверка каждые 30 сек
 
 BOT_TOKEN = "8162509137:AAEJE0QFu1EIovWpO4MMTdRh2zKC-n-_ZT4"
 CHAT_ID = "1822483442"
-ACCOUNT = "CxKFkAu8LngjYmcCjT2siKyAiMrKjbTB96NRXg8jqHH6"
-CHECK_INTERVAL = 15  # секунд
+last_signature = None
 
-RPC_URLS = [
-    "https://api.mainnet-beta.solana.com",
-    "https://rpc.ankr.com/solana",
-    "https://solana-mainnet.g.alchemy.com/v2/demo",
-    "https://free.rpcpool.com"
-]
 
+# === Telegram уведомления ===
 def send_telegram_message(text):
+    if not BOT_TOKEN or not CHAT_ID:
+        print("⚠️ Telegram не настроен, сообщение не отправлено:", text)
+        return
+
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": text,
+        "disable_web_page_preview": False,
+    }
     try:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        data = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
-        r = requests.post(url, data=data)
-        print("📨 Telegram response:", r.text)
+        r = requests.post(url, json=payload, timeout=10)
+        if r.status_code != 200:
+            print("⚠️ Ошибка Telegram:", r.text)
     except Exception as e:
-        print("⚠️ Ошибка отправки Telegram:", e)
+        print("⚠️ Ошибка при отправке сообщения:", e)
 
-def get_latest_signature():
-    for rpc in RPC_URLS:
-        try:
-            print(f"🔗 Проверяем RPC: {rpc}")
-            payload = {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "getSignaturesForAddress",
-                "params": [ACCOUNT, {"limit": 1}]
-            }
-            r = requests.post(rpc, json=payload, timeout=10)
-            r.raise_for_status()
-            sigs = r.json().get("result", [])
-            if sigs:
-                print("📦 Последняя сигнатура:", sigs[0]["signature"])
-                return sigs[0]["signature"]
-        except Exception as e:
-            print(f"⚠️ RPC ошибка ({rpc}):", e)
-    return None
 
-def check_new_transfer(last_sig):
-    for rpc in RPC_URLS:
-        try:
-            payload = {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "getSignaturesForAddress",
-                "params": [ACCOUNT, {"limit": 1}]
-            }
-            r = requests.post(rpc, json=payload, timeout=10)
-            r.raise_for_status()
-            sigs = r.json().get("result", [])
-            if not sigs:
-                print("⏳ Нет новых трансферов на RPC:", rpc)
-                continue
+# === Запрос к RPC ===
+def get_recent_transfers():
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getSignaturesForAddress",
+        "params": [ADDRESS, {"limit": 5}]
+    }
+    try:
+        response = requests.post(RPC_URL, json=payload, timeout=15)
+        response.raise_for_status()
+        data = response.json().get("result", [])
+        return data
+    except Exception as e:
+        print(f"⚠️ RPC ошибка ({RPC_URL}): {e}")
+        return []
 
-            latest_sig = sigs[0]["signature"]
-            if latest_sig != last_sig:
-                print(f"💸 Новый трансфер найден: {latest_sig}")
-                send_telegram_message(
-                    f"💸 <b>Новый трансфер!</b>\n"
-                    f"<a href='https://solscan.io/tx/{latest_sig}'>Открыть в Solscan</a>"
-                )
-                return latest_sig
-        except Exception as e:
-            print(f"⚠️ RPC ошибка ({rpc}):", e)
-    return last_sig
 
-# Простой health сервер для Render
-class SimpleHandler(BaseHTTPRequestHandler):
+# === Проверка новых трансферов ===
+def check_new_transfers():
+    global last_signature
+    data = get_recent_transfers()
+
+    if not data:
+        print("⚠️ Нет данных от RPC.")
+        return
+
+    # Собираем новые подписи
+    new_sigs = []
+    for tx in data:
+        sig = tx.get("signature")
+        if not sig:
+            continue
+        if sig == last_signature:
+            break
+        new_sigs.append(sig)
+
+    if not new_sigs:
+        print("⏳ Нет новых трансферов...")
+        return
+
+    # Отправляем уведомления
+    for sig in reversed(new_sigs):
+        url = f"https://solscan.io/account/{ADDRESS}#transfers"
+        msg = (
+            f"💸 Новый трансфер на Solana!\n"
+            f"🔗 [Открыть в Solscan]({url})\n"
+            f"📍 Адрес: `{ADDRESS}`"
+        )
+        print(msg)
+        send_telegram_message(msg)
+
+    last_signature = data[0].get("signature")
+
+
+# === HTTP сервер для Render ===
+class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
+        self.send_header('Content-type', 'text/html')
         self.end_headers()
-        self.wfile.write(b"Bot is alive")
-    def do_HEAD(self):
-        self.send_response(200)
-        self.end_headers()
+        self.wfile.write(b"Bot is running")
 
-def run_server():
-    server = HTTPServer(("0.0.0.0", 10000), SimpleHandler)
-    print("🌍 Health server запущен на порту 10000")
+def start_server():
+    server = HTTPServer(('0.0.0.0', 10000), HealthHandler)
+    print("🌐 Health сервер запущен на порту 10000")
     server.serve_forever()
 
-if __name__ == "__main__":
-    send_telegram_message("✅ Бот запущен и отслеживает новые трансферы.")
-    last_sig = get_latest_signature()
-    if not last_sig:
-        send_telegram_message("⚠️ Не удалось получить последнюю сигнатуру при запуске.")
+
+# === Главный цикл ===
+def main():
+    global last_signature
+    print(f"🚀 Бот запущен! Отслеживаем кошелёк:\n{ADDRESS}\n")
+
+    send_telegram_message("✅ Бот запущен и следит за новыми трансферами на Solana!")
+
+    # Инициализация последней транзакции
+    txs = get_recent_transfers()
+    if txs:
+        last_signature = txs[0].get("signature")
+        print(f"🟢 Последняя сигнатура при запуске: {last_signature}")
     else:
-        print("🚀 Отслеживаем трансферы для адреса:", ACCOUNT)
+        print("⚠️ Не удалось получить последние трансферы при запуске.")
 
-    import threading
-    threading.Thread(target=run_server, daemon=True).start()
-
+    # Цикл
     while True:
-        last_sig = check_new_transfer(last_sig)
+        try:
+            check_new_transfers()
+        except Exception as e:
+            print("⚠️ Ошибка в основном цикле:", e)
         time.sleep(CHECK_INTERVAL)
+
+
+if __name__ == "__main__":
+    # Фон: сервер для Render
+    threading.Thread(target=start_server, daemon=True).start()
+    # Запуск логики
+    main()
