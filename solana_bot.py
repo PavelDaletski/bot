@@ -6,7 +6,7 @@ import threading
 # === Настройки ===
 ADDRESS = "CxKFkAu8LngjYmcCjT2siKyAiMrKjbTB96NRXg8jqHH6"
 RPC_URL = "https://api.mainnet-beta.solana.com"
-CHECK_INTERVAL = 15  # Проверка каждые 30 секунд
+CHECK_INTERVAL = 8  # Проверка каждые 30 секунд
 
 BOT_TOKEN = "8162509137:AAEJE0QFu1EIovWpO4MMTdRh2zKC-n-_ZT4"
 CHAT_ID = "1822483442"
