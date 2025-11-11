@@ -9,7 +9,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 ADDRESS = "CxKFkAu8LngjYmcCjT2siKyAiMrKjbTB96NRXg8jqHH6"
 TELEGRAM_BOT_TOKEN = "8162509137:AAEJE0QFu1EIovWpO4MMTdRh2zKC-n-_ZT4"
 TELEGRAM_CHAT_ID = "1822483442"
-CHECK_INTERVAL = 30  # секунд между проверками
+CHECK_INTERVAL = 4  # секунд между проверками
 SOLSCAN_TRANSFER_URL = f"https://public-api.solscan.io/account/transfer?address={ADDRESS}&limit=5"
 
 last_transfers = set()
