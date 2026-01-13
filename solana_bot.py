@@ -1,109 +1,137 @@
-# solana_bot.py — версия с health endpoint для Render
 import requests
 import time
 import os
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-# === Настройки ===
-ADDRESS = "CxKFkAu8LngjYmcCjT2siKyAiMrKjbTB96NRXg8jqHH6"
+# ========= НАСТРОЙКИ =========
+
+TOKEN_MINT = "2tgZJ6N7buMDq9HZWbzXvSPFq6MYWbrAGCoDD22Ypump"
+
+MIN_PRICE = 0.00001     # 🔽 цена падения
+MAX_PRICE = 0.00003     # 🔼 цена пробоя вверх
+
+CHECK_INTERVAL = 20     # секунд
+
 TELEGRAM_BOT_TOKEN = "8162509137:AAEJE0QFu1EIovWpO4MMTdRh2zKC-n-_ZT4"
 TELEGRAM_CHAT_ID = "1822483442"
-CHECK_INTERVAL = 4  # секунд между проверками
-SOLSCAN_TRANSFER_URL = f"https://public-api.solscan.io/account/transfer?address={ADDRESS}&limit=5"
 
-last_transfers = set()
+# ========= СОСТОЯНИЕ =========
 
-# === Telegram ===
-def send_telegram_message(text):
+previous_price = None
+alert_down_sent = False
+alert_up_sent = False
+
+# ========= TELEGRAM =========
+
+def send_telegram(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": text,
-        "disable_web_page_preview": True,
-        "parse_mode": "Markdown"
+        "parse_mode": "Markdown",
+        "disable_web_page_preview": True
     }
     try:
-        r = requests.post(url, json=payload, timeout=10)
-        if not r.ok:
-            print(f"Ошибка Telegram: {r.status_code} {r.text}")
+        requests.post(url, json=payload, timeout=10)
     except Exception as e:
-        print("Ошибка при отправке Telegram:", e)
+        print("Telegram error:", e)
 
-# === Получаем последние трансферы с Solscan ===
-def get_recent_transfers():
+# ========= ЦЕНА С DexScreener =========
+
+def get_price():
+    url = f"https://api.dexscreener.com/latest/dex/tokens/{TOKEN_MINT}"
     try:
-        url = SOLSCAN_TRANSFER_URL
         r = requests.get(url, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            if isinstance(data, list):
-                return data
-            # иногда Solscan возвращает объект с key 'data'
-            if isinstance(data, dict) and 'data' in data:
-                return data['data']
-        else:
-            print(f"⚠️ Solscan returned HTTP {r.status_code}: {r.text}")
-    except Exception as e:
-        print("⚠️ Ошибка Solscan API:", e)
-    return []
+        if r.status_code != 200:
+            return None
 
-# === Основная логика ===
-def poll_loop():
-    global last_transfers
-    print("🚀 Запущен poll loop — отслеживаем трансферы для", ADDRESS)
-    send_telegram_message("✅ Бот запущен и отслеживает трансферы (Solscan).")
+        data = r.json()
+        pairs = data.get("pairs", [])
+        if not pairs:
+            return None
+
+        pair = max(
+            pairs,
+            key=lambda x: float(x.get("liquidity", {}).get("usd", 0))
+        )
+        return float(pair["priceUsd"])
+
+    except Exception as e:
+        print("Price error:", e)
+        return None
+
+# ========= ОСНОВНОЙ ЦИКЛ =========
+
+def price_loop():
+    global previous_price, alert_down_sent, alert_up_sent
+
+    send_telegram(
+        "✅ *Бот запущен*\n\n"
+        f"Mint: `{TOKEN_MINT}`\n"
+        f"📉 Падение ниже: `{MIN_PRICE}`\n"
+        f"📈 Пробой выше: `{MAX_PRICE}`"
+    )
+
     while True:
-        try:
-            transfers = get_recent_transfers()
-            new_hashes = []
-            for t in transfers:
-                # ключи в ответе Solscan: 'txHash' или 'txhash' — проверяем оба
-                sig = t.get("txHash") or t.get("txhash") or t.get("tx")
-                if not sig:
-                    continue
-                if sig not in last_transfers:
-                    new_hashes.append(sig)
-                    last_transfers.add(sig)
-            # отправляем уведомления от старых к новым
-            for sig in reversed(new_hashes):
-                msg = (
-                    "💸 *Новый трансфер на Solana!*\n\n"
-                    f"🔗 [Посмотреть в Solscan](https://solscan.io/tx/{sig})\n"
-                    f"📄 [Страница трансферов кошелька](https://solscan.io/account/{ADDRESS}#transfers)"
-                )
-                send_telegram_message(msg)
-                print("📩 Уведомление отправлено для:", sig)
-        except Exception as e:
-            print("⚠️ Ошибка в poll_loop:", e)
+        price = get_price()
+        if price is None:
+            time.sleep(CHECK_INTERVAL)
+            continue
+
+        print("Цена:", price)
+
+        # ---- ПРОБОЙ ВВЕРХ ----
+        if (
+            previous_price is not None
+            and not alert_up_sent
+            and previous_price < MAX_PRICE
+            and price >= MAX_PRICE
+        ):
+            alert_up_sent = True
+            send_telegram(
+                "📈 *ПРОБОЙ ВВЕРХ!*\n\n"
+                f"Цена: *{price:.10f} USD*\n"
+                f"Уровень: `{MAX_PRICE}`\n\n"
+                f"🔗 https://dexscreener.com/solana/{TOKEN_MINT}"
+            )
+
+        # ---- ПАДЕНИЕ ВНИЗ ----
+        if (
+            previous_price is not None
+            and not alert_down_sent
+            and previous_price > MIN_PRICE
+            and price <= MIN_PRICE
+        ):
+            alert_down_sent = True
+            send_telegram(
+                "📉 *ПАДЕНИЕ ЦЕНЫ!*\n\n"
+                f"Цена: *{price:.10f} USD*\n"
+                f"Уровень: `{MIN_PRICE}`\n\n"
+                f"🔗 https://dexscreener.com/solana/{TOKEN_MINT}"
+            )
+
+        previous_price = price
         time.sleep(CHECK_INTERVAL)
 
-# === Минимальный HTTP health сервер (GET + HEAD) ===
+# ========= HEALTH SERVER (Render) =========
+
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
-        self.send_header("Content-Type", "text/plain")
         self.end_headers()
-        body = f"OK - bot alive for {ADDRESS}\n"
-        self.wfile.write(body.encode("utf-8"))
+        self.wfile.write(b"OK")
 
     def do_HEAD(self):
-        # чтобы Render не получал 501 на HEAD
         self.send_response(200)
-        self.send_header("Content-Type", "text/plain")
         self.end_headers()
 
-def run_health_server():
-    port = int(os.environ.get("PORT", "10000"))
-    server = HTTPServer(("0.0.0.0", port), HealthHandler)
-    print(f"🌐 Health server started on port {port}")
-    server.serve_forever()
+def run_server():
+    port = int(os.environ.get("PORT", 10000))
+    HTTPServer(("0.0.0.0", port), HealthHandler).serve_forever()
 
+# ========= START =========
 
 if __name__ == "__main__":
-    # Запускаем health-server в фоне
-    t = threading.Thread(target=run_health_server, daemon=True)
-    t.start()
-
-    # Запускаем основной polling loop
-    poll_loop()
+    threading.Thread(target=run_server, daemon=True).start()
+    price_loop()
